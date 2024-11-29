@@ -4,8 +4,6 @@ beautifulsoup4
 requests
 nltk
 scikit-learn
-pickle 
-scikit-learn 
 matplotlib
 seaborn 
 numpy
