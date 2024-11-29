@@ -23,10 +23,10 @@ def remove_html(text):
     return html.sub(r'', text)
 
 def remove_emoji(text):
-    emoji_pattern = re.compile("["
-        u"\U0001F600-\U0001F64F"
-        u"\U0001F300-\U0001F5FF"
-        u"\U0001F680-\U0001F6FF"
+    emoji_pattern = re.compile("[" 
+        u"\U0001F600-\U0001F64F" 
+        u"\U0001F300-\U0001F5FF" 
+        u"\U0001F680-\U0001F6FF" 
         u"\U0001F1E0-\U0001F1FF""]+", flags=re.UNICODE)
     return emoji_pattern.sub(r'', text)
 
@@ -52,16 +52,20 @@ def preprocess_text(text):
     else:
         return ""
 
-# Membaca data dari file CSV
-@st.cache
-def load_data(file_path):
-    return pd.read_csv(file_path)
-
 # Fungsi untuk TF-IDF Vectorization
 def compute_tfidf(data, column='stopword_removal'):
+    global vectorizer, tfidf_matrix  # Menyatakan variabel ini sebagai global
     vectorizer = TfidfVectorizer()
     tfidf_matrix = vectorizer.fit_transform(data[column])
     return pd.DataFrame(tfidf_matrix.toarray(), columns=vectorizer.get_feature_names_out())
+
+# Fungsi pencarian berita serupa
+def search_similar(query, top_n=5):
+    query = preprocess_text(query)
+    query_vector = vectorizer.transform([query])
+    similarities = np.dot(query_vector, tfidf_matrix.T).toarray()[0]
+    top_indices = similarities.argsort()[-top_n:][::-1]
+    return df.iloc[top_indices][['judul', 'kategori', 'cleansed_text']]
 
 # Layout Aplikasi Streamlit
 st.title("Aplikasi SEBI - Pengambilan dan Analisis Berita")
@@ -90,14 +94,6 @@ if uploaded_file is not None:
     top_n = st.slider("Pilih jumlah kata yang akan ditampilkan", 10, 50, 20)
     top_words = tfidf_df.sum().sort_values(ascending=False).head(top_n)
     st.bar_chart(top_words)
-
-    # Fungsi pencarian berita serupa
-    def search_similar(query, top_n=5):
-        query = preprocess_text(query)
-        query_vector = vectorizer.transform([query])
-        similarities = np.dot(query_vector, tfidf_matrix.T).toarray()[0]
-        top_indices = similarities.argsort()[-top_n:][::-1]
-        return df.iloc[top_indices][['judul', 'kategori', 'cleansed_text']]
 
     # Pencarian berita serupa
     st.subheader("Cari Berita Serupa")
