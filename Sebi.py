@@ -1,73 +1,108 @@
+# Import library yang dibutuhkan
 import streamlit as st
 import pandas as pd
 import numpy as np
-import pickle
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.preprocessing import LabelEncoder
 import re
-from nltk.corpus import stopwords
 import nltk
+from nltk.corpus import stopwords
+from collections import defaultdict
+import hashlib
+import matplotlib.pyplot as plt
 
-# Load pre-trained models and data
-with open('logistic_regression_model.pkl', 'rb') as model_file:
-    model = pickle.load(model_file)
+# Download NLTK stopwords
+nltk.download('stopwords')
 
-with open('tfidf_vectorizer.pkl', 'rb') as vectorizer_file:
-    vectorizer = pickle.load(vectorizer_file)
+# Fungsi untuk membersihkan teks (Cleansing)
+def remove_url(text):
+    url = re.compile(r'https?://\S+|www\.S+')
+    return url.sub(r'', text)
 
-# Load the preprocessed data
+def remove_html(text):
+    html = re.compile(r'<.#?>')
+    return html.sub(r'', text)
+
+def remove_emoji(text):
+    emoji_pattern = re.compile("["
+        u"\U0001F600-\U0001F64F"
+        u"\U0001F300-\U0001F5FF"
+        u"\U0001F680-\U0001F6FF"
+        u"\U0001F1E0-\U0001F1FF""]+", flags=re.UNICODE)
+    return emoji_pattern.sub(r'', text)
+
+def remove_numbers(text):
+    return re.sub(r'\d+', '', text)
+
+def remove_symbols(text):
+    return re.sub(r'[^a-zA-Z0-9\s]', '', text)
+
+# Preprocessing teks
+def preprocess_text(text):
+    if isinstance(text, str):
+        text = remove_url(text)
+        text = remove_html(text)
+        text = remove_emoji(text)
+        text = remove_numbers(text)
+        text = remove_symbols(text)
+        text = text.lower()
+        tokens = text.split()
+        stop_words = set(stopwords.words('indonesian'))
+        tokens = [word for word in tokens if word not in stop_words]
+        return ' '.join(tokens)
+    else:
+        return ""
+
+# Membaca data dari file CSV
 @st.cache
-def load_data():
-    return pd.read_csv('Hasil_Prepros_Berita/Hasil_Prepros_Berita.csv')
+def load_data(file_path):
+    return pd.read_csv(file_path)
 
-df = load_data()
+# Fungsi untuk TF-IDF Vectorization
+def compute_tfidf(data, column='stopword_removal'):
+    vectorizer = TfidfVectorizer()
+    tfidf_matrix = vectorizer.fit_transform(data[column])
+    return pd.DataFrame(tfidf_matrix.toarray(), columns=vectorizer.get_feature_names_out())
 
-# Display the title of the app
-st.title('Aplikasi Klasifikasi Berita dengan Streamlit')
+# Layout Aplikasi Streamlit
+st.title("Aplikasi SEBI - Pengambilan dan Analisis Berita")
 
-# Sidebar for navigation
-st.sidebar.header('Menu')
-options = ['Lihat Data', 'Klasifikasi Berita', 'Preprocessing Data']
-choice = st.sidebar.selectbox('Pilih Menu:', options)
-
-# Show raw data in 'Lihat Data' section
-if choice == 'Lihat Data':
-    st.subheader('Data Berita')
+# Upload file CSV
+uploaded_file = st.file_uploader("Upload CSV Hasil Crawling", type="csv")
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+    st.write("Data Berita:")
     st.dataframe(df.head(10))
 
-# Preprocessing function
-def preprocess_text(text):
-    # Case folding
-    text = text.lower()
-    # Remove URLs, numbers, and special characters
-    text = re.sub(r'https?://\S+|www\.\S+', '', text)
-    text = re.sub(r'\d+', '', text)
-    text = re.sub(r'[^a-zA-Z\s]', '', text)
-    # Remove stopwords
-    stop_words = set(stopwords.words('indonesian'))
-    tokens = [word for word in text.split() if word not in stop_words]
-    return ' '.join(tokens)
+    # Preprocessing
+    st.subheader("Preprocessing Data")
+    df['cleansed_text'] = df['isi'].apply(preprocess_text)
+    st.write("Data setelah Preprocessing:")
+    st.dataframe(df[['judul', 'cleansed_text']].head(10))
 
-# Klasifikasi berita dengan model logistic regression
-if choice == 'Klasifikasi Berita':
-    st.subheader('Klasifikasi Berita')
-    input_text = st.text_area('Masukkan Berita untuk Diklasifikasikan:', '')
-    
-    if st.button('Klasifikasi'):
-        if input_text:
-            processed_text = preprocess_text(input_text)
-            # Vectorize the input text
-            input_vector = vectorizer.transform([processed_text])
-            # Predict the category
-            prediction = model.predict(input_vector)
-            st.write(f'Prediksi Kategori Berita: {prediction[0]}')
-        else:
-            st.error('Harap masukkan teks berita.')
+    # TF-IDF Vectorization
+    st.subheader("Hasil TF-IDF Vectorization")
+    tfidf_df = compute_tfidf(df, column='cleansed_text')
+    st.write("TF-IDF DataFrame:")
+    st.dataframe(tfidf_df.head(10))
 
-# Processing data for 'Preprocessing Data' section
-if choice == 'Preprocessing Data':
-    st.subheader('Preprocessing Data Berita')
-    st.write('Preprocessing dilakukan pada data crawling untuk membersihkan teks sebelum klasifikasi.')
-    if st.button('Tampilkan Data Preprocessed'):
-        df_preprocessed = pd.read_csv('Hasil_Prepros_Berita/Hasil_Prepros_Berita.csv')
-        st.dataframe(df_preprocessed.head(10))
+    # Visualisasi TF-IDF
+    st.subheader("Visualisasi TF-IDF")
+    top_n = st.slider("Pilih jumlah kata yang akan ditampilkan", 10, 50, 20)
+    top_words = tfidf_df.sum().sort_values(ascending=False).head(top_n)
+    st.bar_chart(top_words)
+
+    # Fungsi pencarian berita serupa
+    def search_similar(query, top_n=5):
+        query = preprocess_text(query)
+        query_vector = vectorizer.transform([query])
+        similarities = np.dot(query_vector, tfidf_matrix.T).toarray()[0]
+        top_indices = similarities.argsort()[-top_n:][::-1]
+        return df.iloc[top_indices][['judul', 'kategori', 'cleansed_text']]
+
+    # Pencarian berita serupa
+    st.subheader("Cari Berita Serupa")
+    query_input = st.text_area("Masukkan kata kunci pencarian:")
+    if query_input:
+        results = search_similar(query_input, top_n=5)
+        st.write("Berita Serupa:")
+        st.dataframe(results)
